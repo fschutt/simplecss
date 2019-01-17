@@ -53,6 +53,13 @@ pub enum Token<'a> {
     ///
     /// https://www.w3.org/TR/CSS21/selector.html#pseudo-class-selectors
     PseudoClass(&'a str),
+    /// Nth-Child Pseudo-class
+    ///
+    /// Value contains everything between `()`.
+    /// We do not validate it in any way. It can contain any text or even be empty.
+    ///
+    /// https://www.w3.org/TR/selectors-4/#the-nth-child-pseudo
+    NthChildPseudoClass(&'a str),
     /// Language pseudo-class
     ///
     /// Value contains everything between `()`.
@@ -180,7 +187,15 @@ impl<'a> Tokenizer<'a> {
                 self.after_selector = true;
                 self.stream.advance_raw(1);
                 let s = try!(self.consume_ident());
-                if s == "lang" {
+                if s == "nth-child" {
+                    try!(self.stream.advance(1)); // (
+                    let len = try!(self.stream.length_to(b')'));
+                    let nth_child = self.stream.read_raw_str(len);
+
+                    self.stream.advance_raw(1); // )
+                    return Ok(Token::NthChildPseudoClass(nth_child));
+                }
+                else if s == "lang" {
                     try!(self.stream.advance(1)); // (
                     let len = try!(self.stream.length_to(b')'));
                     let lang = self.stream.read_raw_str(len);
