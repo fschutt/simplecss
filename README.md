@@ -1,4 +1,8 @@
-# simplecss
+# azul-simplecss
+
+Fork of https://github.com/RazrFalcon/simplecss (because lack of maintainer). Added `@rules` + better parsing on top of original parser.
+
+----
 
 A very simple streaming parser/tokenizer for [CSS 2.1](https://www.w3.org/TR/CSS21/)
 data format without heap allocations.

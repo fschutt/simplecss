@@ -2,9 +2,9 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-extern crate simplecss;
+extern crate azul_simplecss;
 
-use simplecss::{Tokenizer, Token, Combinator, Error, ErrorPos};
+use azul_simplecss::{Tokenizer, Token, Combinator, Error, ErrorPos};
 
 macro_rules! test {
     ($name:ident, $text:expr, $( $token:expr ),*) => {
