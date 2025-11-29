@@ -15,6 +15,8 @@ pub enum Combinator {
     GreaterThan,
     /// Adjacent sibling selector
     Plus,
+    /// General sibling selector
+    Tilde,
 }
 
 /// CSS token.
@@ -268,6 +270,17 @@ impl<'a> Tokenizer<'a> {
                     return Err(Error::UnknownToken(self.stream.gen_error_pos()));
                 }
             }
+            b'~' => {
+                if self.after_selector {
+                    self.after_selector = false;
+                    self.has_at_rule = false;
+                    self.stream.advance_raw(1);
+                    self.stream.skip_spaces();
+                    return Ok(Token::Combinator(Combinator::Tilde));
+                } else {
+                    return Err(Error::UnknownToken(self.stream.gen_error_pos()));
+                }
+            }
             b'/' => {
                 if try!(self.consume_comment()) {
                     return self.parse_next();
@@ -284,7 +297,7 @@ impl<'a> Tokenizer<'a> {
                     }
 
                     match self.stream.curr_char()? {
-                        b'{' | b'/' | b'>' | b'+' | b'*' => { return self.parse_next(); },
+                        b'{' | b'/' | b'>' | b'+' | b'~' | b'*' => { return self.parse_next(); },
                         _ => {
                             self.after_selector = false;
                             if !self.has_at_rule {
