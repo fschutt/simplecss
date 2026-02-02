@@ -352,11 +352,12 @@ test!(blocks_6,
     Token::AtRule("keyframes"),
     Token::AtStr("hello"),
     Token::BlockStart,
-    Token::DeclarationStr("from"),
+    // With nesting support, 'from' and 'to' are now parsed as TypeSelector (like nested selectors)
+    Token::TypeSelector("from"),
     Token::BlockStart,
     Token::Declaration("width", "500px"),
     Token::BlockEnd,
-    Token::DeclarationStr("to"),
+    Token::TypeSelector("to"),
     Token::BlockStart,
     Token::Declaration("width", "600px"),
     Token::BlockEnd,
@@ -539,10 +540,15 @@ fn invalid_6() {
 
 #[test]
 fn invalid_7() {
+    // With nesting support, [ is now parsed as an attribute selector start,
+    // so we get an AttributeSelector token (with invalid content including the semicolon)
     let mut t = Tokenizer::new("div { [color: red;] }");
     assert_eq!(t.parse_next().unwrap(), Token::TypeSelector("div"));
     assert_eq!(t.parse_next().unwrap(), Token::BlockStart);
-    assert_eq!(t.parse_next().unwrap_err(), Error::UnknownToken(ErrorPos::new(1, 7)));
+    // The attribute selector now captures everything until ]
+    assert_eq!(t.parse_next().unwrap(), Token::AttributeSelector("color: red;"));
+    assert_eq!(t.parse_next().unwrap(), Token::BlockEnd);
+    assert_eq!(t.parse_next().unwrap(), Token::EndOfStream);
 }
 
 #[test]
@@ -572,10 +578,13 @@ fn invalid_10() {
 
 #[test]
 fn invalid_11() {
+    // With nesting support, after the comment /*\*/ the * is parsed as UniversalSelector
     let mut t = Tokenizer::new("div { /*\\*/*/color: red; }");
     assert_eq!(t.parse_next().unwrap(), Token::TypeSelector("div"));
     assert_eq!(t.parse_next().unwrap(), Token::BlockStart);
-    assert_eq!(t.parse_next().unwrap_err(), Error::UnknownToken(ErrorPos::new(1, 12)));
+    // Comment /*\*/ is consumed, then * is a UniversalSelector, then / causes error
+    assert_eq!(t.parse_next().unwrap(), Token::UniversalSelector);
+    assert_eq!(t.parse_next().unwrap_err(), Error::UnknownToken(ErrorPos::new(1, 14)));
 }
 
 test_err!(invalid_12,
@@ -628,4 +637,215 @@ fn invalid_18() {
     assert_eq!(t.parse_next().unwrap(), Token::TypeSelector("div"));
     assert_eq!(t.parse_next().unwrap(), Token::Combinator(Combinator::GreaterThan));
     assert_eq!(t.parse_next().unwrap_err(), Error::UnknownToken(ErrorPos::new(1, 7)));
+}
+
+// =====================================================================
+// CSS NESTING TESTS
+// =====================================================================
+
+/// Test nested pseudo-class selector: .button { :hover { color: red; } }
+#[test]
+fn nested_pseudo_class() {
+    let mut t = Tokenizer::new(".button { :hover { color: red; } }");
+    assert_eq!(t.parse_next().unwrap(), Token::ClassSelector("button"));
+    assert_eq!(t.parse_next().unwrap(), Token::BlockStart);
+    assert_eq!(t.parse_next().unwrap(), Token::PseudoClass { selector: "hover", value: None });
+    assert_eq!(t.parse_next().unwrap(), Token::BlockStart);
+    assert_eq!(t.parse_next().unwrap(), Token::Declaration("color", "red"));
+    assert_eq!(t.parse_next().unwrap(), Token::BlockEnd);
+    assert_eq!(t.parse_next().unwrap(), Token::BlockEnd);
+    assert_eq!(t.parse_next().unwrap(), Token::EndOfStream);
+}
+
+/// Test nested class selector: .outer { .inner { color: blue; } }
+#[test]
+fn nested_class_selector() {
+    let mut t = Tokenizer::new(".outer { .inner { color: blue; } }");
+    assert_eq!(t.parse_next().unwrap(), Token::ClassSelector("outer"));
+    assert_eq!(t.parse_next().unwrap(), Token::BlockStart);
+    assert_eq!(t.parse_next().unwrap(), Token::ClassSelector("inner"));
+    assert_eq!(t.parse_next().unwrap(), Token::BlockStart);
+    assert_eq!(t.parse_next().unwrap(), Token::Declaration("color", "blue"));
+    assert_eq!(t.parse_next().unwrap(), Token::BlockEnd);
+    assert_eq!(t.parse_next().unwrap(), Token::BlockEnd);
+    assert_eq!(t.parse_next().unwrap(), Token::EndOfStream);
+}
+
+/// Test nested ID selector: .outer { #inner { color: green; } }
+#[test]
+fn nested_id_selector() {
+    let mut t = Tokenizer::new(".outer { #inner { color: green; } }");
+    assert_eq!(t.parse_next().unwrap(), Token::ClassSelector("outer"));
+    assert_eq!(t.parse_next().unwrap(), Token::BlockStart);
+    assert_eq!(t.parse_next().unwrap(), Token::IdSelector("inner"));
+    assert_eq!(t.parse_next().unwrap(), Token::BlockStart);
+    assert_eq!(t.parse_next().unwrap(), Token::Declaration("color", "green"));
+    assert_eq!(t.parse_next().unwrap(), Token::BlockEnd);
+    assert_eq!(t.parse_next().unwrap(), Token::BlockEnd);
+    assert_eq!(t.parse_next().unwrap(), Token::EndOfStream);
+}
+
+/// Test nested @-rule: .button { @os linux { background: blue; } }
+#[test]
+fn nested_at_rule() {
+    let mut t = Tokenizer::new(".button { @os linux { background: blue; } }");
+    assert_eq!(t.parse_next().unwrap(), Token::ClassSelector("button"));
+    assert_eq!(t.parse_next().unwrap(), Token::BlockStart);
+    assert_eq!(t.parse_next().unwrap(), Token::AtRule("os"));
+    assert_eq!(t.parse_next().unwrap(), Token::AtStr("linux"));
+    assert_eq!(t.parse_next().unwrap(), Token::BlockStart);
+    assert_eq!(t.parse_next().unwrap(), Token::Declaration("background", "blue"));
+    assert_eq!(t.parse_next().unwrap(), Token::BlockEnd);
+    assert_eq!(t.parse_next().unwrap(), Token::BlockEnd);
+    assert_eq!(t.parse_next().unwrap(), Token::EndOfStream);
+}
+
+/// Test nested @media with parenthesized condition
+#[test]
+fn nested_at_media() {
+    let mut t = Tokenizer::new(".container { @media (min-width: 800px) { font-size: 18px; } }");
+    assert_eq!(t.parse_next().unwrap(), Token::ClassSelector("container"));
+    assert_eq!(t.parse_next().unwrap(), Token::BlockStart);
+    assert_eq!(t.parse_next().unwrap(), Token::AtRule("media"));
+    assert_eq!(t.parse_next().unwrap(), Token::AtStr("(min-width: 800px)"));
+    assert_eq!(t.parse_next().unwrap(), Token::BlockStart);
+    assert_eq!(t.parse_next().unwrap(), Token::Declaration("font-size", "18px"));
+    assert_eq!(t.parse_next().unwrap(), Token::BlockEnd);
+    assert_eq!(t.parse_next().unwrap(), Token::BlockEnd);
+    assert_eq!(t.parse_next().unwrap(), Token::EndOfStream);
+}
+
+/// Test multiple nesting levels: .a { .b { .c { color: red; } } }
+#[test]
+fn deeply_nested_selectors() {
+    let mut t = Tokenizer::new(".a { .b { .c { color: red; } } }");
+    assert_eq!(t.parse_next().unwrap(), Token::ClassSelector("a"));
+    assert_eq!(t.parse_next().unwrap(), Token::BlockStart);
+    assert_eq!(t.parse_next().unwrap(), Token::ClassSelector("b"));
+    assert_eq!(t.parse_next().unwrap(), Token::BlockStart);
+    assert_eq!(t.parse_next().unwrap(), Token::ClassSelector("c"));
+    assert_eq!(t.parse_next().unwrap(), Token::BlockStart);
+    assert_eq!(t.parse_next().unwrap(), Token::Declaration("color", "red"));
+    assert_eq!(t.parse_next().unwrap(), Token::BlockEnd);
+    assert_eq!(t.parse_next().unwrap(), Token::BlockEnd);
+    assert_eq!(t.parse_next().unwrap(), Token::BlockEnd);
+    assert_eq!(t.parse_next().unwrap(), Token::EndOfStream);
+}
+
+/// Test mixed declarations and nested rules
+#[test]
+fn mixed_declarations_and_nested() {
+    let mut t = Tokenizer::new(".button { color: blue; :hover { color: red; } background: white; }");
+    assert_eq!(t.parse_next().unwrap(), Token::ClassSelector("button"));
+    assert_eq!(t.parse_next().unwrap(), Token::BlockStart);
+    assert_eq!(t.parse_next().unwrap(), Token::Declaration("color", "blue"));
+    assert_eq!(t.parse_next().unwrap(), Token::PseudoClass { selector: "hover", value: None });
+    assert_eq!(t.parse_next().unwrap(), Token::BlockStart);
+    assert_eq!(t.parse_next().unwrap(), Token::Declaration("color", "red"));
+    assert_eq!(t.parse_next().unwrap(), Token::BlockEnd);
+    assert_eq!(t.parse_next().unwrap(), Token::Declaration("background", "white"));
+    assert_eq!(t.parse_next().unwrap(), Token::BlockEnd);
+    assert_eq!(t.parse_next().unwrap(), Token::EndOfStream);
+}
+
+/// Test nested universal selector
+#[test]
+fn nested_universal_selector() {
+    let mut t = Tokenizer::new(".container { * { margin: 0; } }");
+    assert_eq!(t.parse_next().unwrap(), Token::ClassSelector("container"));
+    assert_eq!(t.parse_next().unwrap(), Token::BlockStart);
+    assert_eq!(t.parse_next().unwrap(), Token::UniversalSelector);
+    assert_eq!(t.parse_next().unwrap(), Token::BlockStart);
+    assert_eq!(t.parse_next().unwrap(), Token::Declaration("margin", "0"));
+    assert_eq!(t.parse_next().unwrap(), Token::BlockEnd);
+    assert_eq!(t.parse_next().unwrap(), Token::BlockEnd);
+    assert_eq!(t.parse_next().unwrap(), Token::EndOfStream);
+}
+
+/// Test nested attribute selector
+#[test]
+fn nested_attribute_selector() {
+    let mut t = Tokenizer::new(".form { [type=\"text\"] { border: 1px; } }");
+    assert_eq!(t.parse_next().unwrap(), Token::ClassSelector("form"));
+    assert_eq!(t.parse_next().unwrap(), Token::BlockStart);
+    assert_eq!(t.parse_next().unwrap(), Token::AttributeSelector("type=\"text\""));
+    assert_eq!(t.parse_next().unwrap(), Token::BlockStart);
+    assert_eq!(t.parse_next().unwrap(), Token::Declaration("border", "1px"));
+    assert_eq!(t.parse_next().unwrap(), Token::BlockEnd);
+    assert_eq!(t.parse_next().unwrap(), Token::BlockEnd);
+    assert_eq!(t.parse_next().unwrap(), Token::EndOfStream);
+}
+
+/// Test nested type selector: .container { div { color: red; } }
+#[test]
+fn nested_type_selector() {
+    let mut t = Tokenizer::new(".container { div { color: red; } }");
+    assert_eq!(t.parse_next().unwrap(), Token::ClassSelector("container"));
+    assert_eq!(t.parse_next().unwrap(), Token::BlockStart);
+    assert_eq!(t.parse_next().unwrap(), Token::TypeSelector("div"));
+    assert_eq!(t.parse_next().unwrap(), Token::BlockStart);
+    assert_eq!(t.parse_next().unwrap(), Token::Declaration("color", "red"));
+    assert_eq!(t.parse_next().unwrap(), Token::BlockEnd);
+    assert_eq!(t.parse_next().unwrap(), Token::BlockEnd);
+    assert_eq!(t.parse_next().unwrap(), Token::EndOfStream);
+}
+
+/// Test nested combinator: .parent { > .child { color: red; } }
+#[test]
+fn nested_direct_child_combinator() {
+    let mut t = Tokenizer::new(".parent { > .child { color: red; } }");
+    assert_eq!(t.parse_next().unwrap(), Token::ClassSelector("parent"));
+    assert_eq!(t.parse_next().unwrap(), Token::BlockStart);
+    assert_eq!(t.parse_next().unwrap(), Token::Combinator(Combinator::GreaterThan));
+    assert_eq!(t.parse_next().unwrap(), Token::ClassSelector("child"));
+    assert_eq!(t.parse_next().unwrap(), Token::BlockStart);
+    assert_eq!(t.parse_next().unwrap(), Token::Declaration("color", "red"));
+    assert_eq!(t.parse_next().unwrap(), Token::BlockEnd);
+    assert_eq!(t.parse_next().unwrap(), Token::BlockEnd);
+    assert_eq!(t.parse_next().unwrap(), Token::EndOfStream);
+}
+
+/// Test nested ::pseudo-element
+#[test]
+fn nested_pseudo_element() {
+    let mut t = Tokenizer::new(".button { ::before { content: ''; } }");
+    assert_eq!(t.parse_next().unwrap(), Token::ClassSelector("button"));
+    assert_eq!(t.parse_next().unwrap(), Token::BlockStart);
+    assert_eq!(t.parse_next().unwrap(), Token::DoublePseudoClass { selector: "before", value: None });
+    assert_eq!(t.parse_next().unwrap(), Token::BlockStart);
+    assert_eq!(t.parse_next().unwrap(), Token::Declaration("content", "''"));
+    assert_eq!(t.parse_next().unwrap(), Token::BlockEnd);
+    assert_eq!(t.parse_next().unwrap(), Token::BlockEnd);
+    assert_eq!(t.parse_next().unwrap(), Token::EndOfStream);
+}
+
+/// Test @os at top level (not nested)
+#[test]
+fn at_os_top_level() {
+    let mut t = Tokenizer::new("@os linux { .button { color: red; } }");
+    assert_eq!(t.parse_next().unwrap(), Token::AtRule("os"));
+    assert_eq!(t.parse_next().unwrap(), Token::AtStr("linux"));
+    assert_eq!(t.parse_next().unwrap(), Token::BlockStart);
+    assert_eq!(t.parse_next().unwrap(), Token::ClassSelector("button"));
+    assert_eq!(t.parse_next().unwrap(), Token::BlockStart);
+    assert_eq!(t.parse_next().unwrap(), Token::Declaration("color", "red"));
+    assert_eq!(t.parse_next().unwrap(), Token::BlockEnd);
+    assert_eq!(t.parse_next().unwrap(), Token::BlockEnd);
+    assert_eq!(t.parse_next().unwrap(), Token::EndOfStream);
+}
+
+/// Test multiple nested selectors with comma
+#[test]
+fn nested_comma_selectors() {
+    let mut t = Tokenizer::new(".parent { :hover, :focus { color: red; } }");
+    assert_eq!(t.parse_next().unwrap(), Token::ClassSelector("parent"));
+    assert_eq!(t.parse_next().unwrap(), Token::BlockStart);
+    assert_eq!(t.parse_next().unwrap(), Token::PseudoClass { selector: "hover", value: None });
+    assert_eq!(t.parse_next().unwrap(), Token::Comma);
+    assert_eq!(t.parse_next().unwrap(), Token::PseudoClass { selector: "focus", value: None });
+    assert_eq!(t.parse_next().unwrap(), Token::BlockStart);
+    assert_eq!(t.parse_next().unwrap(), Token::Declaration("color", "red"));
+    assert_eq!(t.parse_next().unwrap(), Token::BlockEnd);
+    assert_eq!(t.parse_next().unwrap(), Token::BlockEnd);
+    assert_eq!(t.parse_next().unwrap(), Token::EndOfStream);
 }

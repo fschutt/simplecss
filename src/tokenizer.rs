@@ -387,13 +387,112 @@ impl<'a> Tokenizer<'a> {
                 return Ok(Token::BlockStart);
             },
             b'@' => {
-                // Nested @-rule inside a block (e.g., @media inside @os)
+                // Nested @-rule inside a block (e.g., @media inside @os, or @os inside .class)
                 self.after_selector = true;
                 self.has_at_rule = true;
                 self.stream.advance_raw(1);
                 let s = self.consume_ident()?;
                 self.stream.skip_spaces();
                 return Ok(Token::AtRule(s));
+            },
+            b':' => {
+                // Nested pseudo-class selector (e.g., :hover { } inside .button { })
+                self.after_selector = true;
+                self.has_at_rule = false;
+                self.stream.advance_raw(1);
+
+                // Check for ::pseudo-element
+                let is_double_colon = self.stream.is_char_eq(b':')?;
+                if is_double_colon {
+                    self.stream.advance_raw(1);
+                }
+
+                let s = self.consume_ident()?;
+
+                if self.stream.curr_char() == Ok(b'(') {
+                    self.stream.advance_raw(1); // (
+                    let inner_len = self.stream.length_to(b')')?;
+                    let inner = self.stream.read_raw_str(inner_len);
+                    self.stream.advance_raw(1); // )
+                    return Ok(if is_double_colon {
+                        Token::DoublePseudoClass { selector: s, value: Some(inner) }
+                    } else {
+                        Token::PseudoClass { selector: s, value: Some(inner) }
+                    });
+                } else {
+                    return Ok(if is_double_colon {
+                        Token::DoublePseudoClass { selector: s, value: None }
+                    } else {
+                        Token::PseudoClass { selector: s, value: None }
+                    });
+                }
+            },
+            b'.' => {
+                // Nested class selector (e.g., .inner { } inside .outer { })
+                self.after_selector = true;
+                self.has_at_rule = false;
+                self.stream.advance_raw(1);
+                let s = self.consume_ident()?;
+                return Ok(Token::ClassSelector(s));
+            },
+            b'#' => {
+                // Nested ID selector (e.g., #inner { } inside .outer { })
+                self.after_selector = true;
+                self.has_at_rule = false;
+                self.stream.advance_raw(1);
+                let s = self.consume_ident()?;
+                return Ok(Token::IdSelector(s));
+            },
+            b'*' => {
+                // Nested universal selector
+                self.after_selector = true;
+                self.has_at_rule = false;
+                self.stream.advance_raw(1);
+                self.stream.skip_spaces();
+                return Ok(Token::UniversalSelector);
+            },
+            b'[' => {
+                // Nested attribute selector
+                self.after_selector = true;
+                self.has_at_rule = false;
+                self.stream.advance_raw(1);
+                let len = self.stream.length_to(b']')?;
+                let s = self.stream.read_raw_str(len);
+                self.stream.advance_raw(1); // ]
+                self.stream.skip_spaces();
+                return Ok(Token::AttributeSelector(s));
+            },
+            b'>' => {
+                // Direct child combinator in nested context
+                self.after_selector = false;
+                self.has_at_rule = false;
+                self.stream.advance_raw(1);
+                self.stream.skip_spaces();
+                return Ok(Token::Combinator(Combinator::GreaterThan));
+            },
+            b'+' => {
+                // Adjacent sibling combinator in nested context
+                self.after_selector = false;
+                self.has_at_rule = false;
+                self.stream.advance_raw(1);
+                self.stream.skip_spaces();
+                return Ok(Token::Combinator(Combinator::Plus));
+            },
+            b'~' => {
+                // General sibling combinator in nested context
+                self.after_selector = false;
+                self.has_at_rule = false;
+                self.stream.advance_raw(1);
+                self.stream.skip_spaces();
+                return Ok(Token::Combinator(Combinator::Tilde));
+            },
+            b',' => {
+                // Comma in nested context (multiple selectors)
+                self.after_selector = false;
+                self.has_at_rule = false;
+                self.stream.advance_raw(1);
+                self.stream.skip_spaces();
+                return Ok(Token::Comma);
             },
             b'(' if self.has_at_rule => {
                 // Parenthesized content in nested @-rule
@@ -428,10 +527,12 @@ impl<'a> Tokenizer<'a> {
                 }
 
                 if self.stream.is_char_eq(b'{')? {
+                    // This is a nested type selector (e.g., "div { }" inside ".outer { }")
                     if name.is_empty() {
                         return Err(Error::UnknownToken(self.stream.gen_error_pos()));
                     } else {
-                        return Ok(Token::DeclarationStr(name));
+                        self.after_selector = true;
+                        return Ok(Token::TypeSelector(name));
                     }
                 }
                 
@@ -439,7 +540,7 @@ impl<'a> Tokenizer<'a> {
                 if !self.stream.is_char_eq(b':')? {
                     // Not a declaration, might be a type selector in nested context
                     self.after_selector = true;
-                    return Ok(Token::DeclarationStr(name));
+                    return Ok(Token::TypeSelector(name));
                 }
 
                 self.stream.advance_raw(1); // :
