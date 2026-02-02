@@ -7,5 +7,6 @@ readme = "README.md"
 description = "A very simple CSS 2.1 tokenizer."
 repository = "https://github.com/RazrFalcon/simplecss"
 keywords = ["css", "parser", "tokenizer"]
+edition = "2021"
 
 [lib]

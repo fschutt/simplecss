@@ -4,21 +4,24 @@
 
 use std::str;
 
-use error::{Error, ErrorPos};
+use crate::error::{Error, ErrorPos};
 
 /// Streaming interface for `&[u8]` data.
-#[derive(PartialEq,Clone,Copy)]
+#[derive(PartialEq, Clone, Copy)]
 pub struct Stream<'a> {
+    /// The source text buffer
     text: &'a [u8],
+    /// Current position in the stream
     pos: usize,
+    /// End position (exclusive)
     end: usize,
 }
 
 #[inline]
 fn is_letter(c: u8) -> bool {
     match c {
-        b'A'...b'Z' => true,
-        b'a'...b'z' => true,
+        b'A'..=b'Z' => true,
+        b'a'..=b'z' => true,
         _ => false,
     }
 }
@@ -26,7 +29,7 @@ fn is_letter(c: u8) -> bool {
 #[inline]
 fn is_digit(c: u8) -> bool {
     match c {
-        b'0'...b'9' => true,
+        b'0'..=b'9' => true,
         _ => false,
     }
 }
@@ -45,9 +48,9 @@ pub fn is_space(c: u8) -> bool {
 impl<'a> Stream<'a> {
     /// Constructs a new `Stream` from data.
     #[inline]
-    pub fn new(text: &[u8]) -> Stream {
+    pub fn new(text: &[u8]) -> Stream<'_> {
         Stream {
-            text: text,
+            text,
             pos: 0,
             end: text.len(),
         }
@@ -55,13 +58,13 @@ impl<'a> Stream<'a> {
 
     /// Constructs a new `Stream` from data.
     #[inline]
-    pub fn new_bound(text: &[u8], start: usize, end: usize) -> Stream {
+    pub fn new_bound(text: &[u8], start: usize, end: usize) -> Stream<'_> {
         assert!(start < end);
 
         Stream {
-            text: text,
+            text,
             pos: start,
-            end: end,
+            end,
         }
     }
 
@@ -130,7 +133,7 @@ impl<'a> Stream<'a> {
     /// ```
     #[inline]
     pub fn advance(&mut self, n: usize) -> Result<(), Error> {
-        try!(self.adv_bound_check(n));
+        self.adv_bound_check(n)?;
         self.pos += n;
         Ok(())
     }

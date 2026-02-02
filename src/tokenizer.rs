@@ -2,9 +2,9 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-use stream;
-use stream::Stream;
-use error::Error;
+use crate::stream;
+use crate::stream::Stream;
+use crate::error::Error;
 
 /// CSS combinator.
 #[derive(PartialEq,Debug)]
@@ -54,7 +54,12 @@ pub enum Token<'a> {
     /// Selector: `"nth-child"`, value: The thing between the braces - `Some("3")`
     ///
     /// https://www.w3.org/TR/CSS21/selector.html#pseudo-class-selectors
-    PseudoClass { selector: &'a str, value: Option<&'a str> },
+    PseudoClass {
+        /// The selector name (e.g., "nth-child", "hover")
+        selector: &'a str,
+        /// The optional value inside parentheses (e.g., "3" in ":nth-child(3)")
+        value: Option<&'a str>,
+    },
     /// `Combinator`
     Combinator(Combinator),
     /// Rules separator
@@ -87,7 +92,12 @@ pub enum Token<'a> {
     /// String following an @rule
     AtStr(&'a str),
     /// Same as PseudoClass, but with two colons (`::thing`).
-    DoublePseudoClass { selector: &'a str, value: Option<&'a str> },
+    DoublePseudoClass {
+        /// The selector name (e.g., "before", "after")
+        selector: &'a str,
+        /// The optional value inside parentheses
+        value: Option<&'a str>,
+    },
     /// End of stream
     ///
     /// Parsing is finished.
@@ -108,17 +118,21 @@ pub struct Tokenizer<'a> {
     after_selector: bool,
     has_at_rule: bool,
     at_start: bool,
+    /// Track nesting depth for nested @-rules support
+    /// Each entry is true if the block at that level was started by an @-rule
+    nesting_stack: Vec<bool>,
 }
 
 impl<'a> Tokenizer<'a> {
     /// Constructs a new `Tokenizer`.
-    pub fn new(text: &str) -> Tokenizer {
+    pub fn new(text: &str) -> Tokenizer<'_> {
         Tokenizer {
             stream: Stream::new(text.as_bytes()),
             state: State::Rule,
             after_selector: false,
             has_at_rule: false,
             at_start: true,
+            nesting_stack: Vec::new(),
         }
     }
 
@@ -129,13 +143,14 @@ impl<'a> Tokenizer<'a> {
     /// like when using [`new()`].
     ///
     /// [`new()`]: #method.new
-    pub fn new_bound(text: &str, start: usize, end: usize) -> Tokenizer {
+    pub fn new_bound(text: &str, start: usize, end: usize) -> Tokenizer<'_> {
         Tokenizer {
             stream: Stream::new_bound(text.as_bytes(), start, end),
             state: State::Rule,
             after_selector: false,
             has_at_rule: false,
             at_start: true,
+            nesting_stack: Vec::new(),
         }
     }
 
@@ -169,20 +184,23 @@ impl<'a> Tokenizer<'a> {
                 self.has_at_rule = true;
                 self.stream.advance_raw(1);
                 let s = self.consume_ident()?;
+                
+                // Don't consume parentheses here - let the next parse_next() call handle it
+                // Just return the @rule name
                 return Ok(Token::AtRule(s));
             }
             b'#' => {
                 self.after_selector = true;
                 self.has_at_rule = false;
                 self.stream.advance_raw(1);
-                let s = try!(self.consume_ident());
+                let s = self.consume_ident()?;
                 return Ok(Token::IdSelector(s));
             }
             b'.' => {
                 self.after_selector = true;
                 self.has_at_rule = false;
                 self.stream.advance_raw(1);
-                let s = try!(self.consume_ident());
+                let s = self.consume_ident()?;
                 return Ok(Token::ClassSelector(s));
             }
             b'*' => {
@@ -203,7 +221,7 @@ impl<'a> Tokenizer<'a> {
                     self.stream.advance_raw(1); // consume the second :
                 }
 
-                let s = try!(self.consume_ident());
+                let s = self.consume_ident()?;
 
                 if self.stream.curr_char() == Ok(b'(') {
                     // Item is a thing()
@@ -228,7 +246,7 @@ impl<'a> Tokenizer<'a> {
                 self.after_selector = true;
                 self.has_at_rule = false;
                 self.stream.advance_raw(1);
-                let len = try!(self.stream.length_to(b']'));
+                let len = self.stream.length_to(b']')?;
                 let s = self.stream.read_raw_str(len);
                 self.stream.advance_raw(1); // ]
                 self.stream.skip_spaces();
@@ -242,6 +260,8 @@ impl<'a> Tokenizer<'a> {
                 return Ok(Token::Comma);
             }
             b'{' => {
+                // Track if this block was started by an @-rule
+                self.nesting_stack.push(self.has_at_rule);
                 self.after_selector = false;
                 self.has_at_rule = false;
                 self.state = State::Declaration;
@@ -282,11 +302,17 @@ impl<'a> Tokenizer<'a> {
                 }
             }
             b'/' => {
-                if try!(self.consume_comment()) {
+                if self.consume_comment()? {
                     return self.parse_next();
                 } else {
                     return Err(Error::UnknownToken(self.stream.gen_error_pos()));
                 }
+            }
+            b'(' if self.has_at_rule => {
+                // Parenthesized content in @-rule like @media (min-width: 800px)
+                let s = self.consume_parenthesized_content()?;
+                self.after_selector = true;
+                return Ok(Token::AtStr(s));
             }
             _ => {
                 if self.stream.is_space_raw() {
@@ -297,7 +323,7 @@ impl<'a> Tokenizer<'a> {
                     }
 
                     match self.stream.curr_char()? {
-                        b'{' | b'/' | b'>' | b'+' | b'~' | b'*' => { return self.parse_next(); },
+                        b'{' | b'/' | b'>' | b'+' | b'~' | b'*' | b'(' => { return self.parse_next(); },
                         _ => {
                             self.after_selector = false;
                             if !self.has_at_rule {
@@ -307,7 +333,7 @@ impl<'a> Tokenizer<'a> {
                     }
                 }
 
-                let s = try!(self.consume_ident());
+                let s = self.consume_ident()?;
                 let token_type = if self.has_at_rule {
                     self.has_at_rule = true;
                     Token::AtStr(s)
@@ -324,20 +350,33 @@ impl<'a> Tokenizer<'a> {
 
     fn consume_declaration(&mut self) -> Result<Token<'a>, Error> {
         self.stream.skip_spaces();
-        self.has_at_rule = false;
 
         match self.stream.curr_char_raw() {
             b'}' => {
+                // Pop nesting level
+                self.nesting_stack.pop();
+                
                 if self.state == State::DeclarationRule {
                     self.state = State::Declaration;
                 } else if self.state == State::Declaration {
-                    self.state = State::Rule;
+                    // Check if we should go back to Declaration or Rule based on nesting
+                    if self.nesting_stack.is_empty() {
+                        self.state = State::Rule;
+                    } else {
+                        // Stay in declaration mode for nested @-rules
+                        self.state = State::Declaration;
+                    }
                 }
+                self.has_at_rule = false;
                 self.stream.advance_raw(1);
                 self.stream.skip_spaces();
                 return Ok(Token::BlockEnd);
             },
             b'{' => {
+                // Track if this block was started by an @-rule
+                self.nesting_stack.push(self.has_at_rule);
+                self.has_at_rule = false;
+                
                 if self.state == State::Rule {
                     self.state = State::Declaration;
                 } else if self.state == State::Declaration {
@@ -347,20 +386,43 @@ impl<'a> Tokenizer<'a> {
                 self.stream.skip_spaces();
                 return Ok(Token::BlockStart);
             },
+            b'@' => {
+                // Nested @-rule inside a block (e.g., @media inside @os)
+                self.after_selector = true;
+                self.has_at_rule = true;
+                self.stream.advance_raw(1);
+                let s = self.consume_ident()?;
+                self.stream.skip_spaces();
+                return Ok(Token::AtRule(s));
+            },
+            b'(' if self.has_at_rule => {
+                // Parenthesized content in nested @-rule
+                let s = self.consume_parenthesized_content()?;
+                self.after_selector = true;
+                return Ok(Token::AtStr(s));
+            },
             b'/' => {
-                if try!(self.consume_comment()) {
+                if self.consume_comment()? {
                     return self.parse_next();
                 } else {
                     return Err(Error::UnknownToken(self.stream.gen_error_pos()));
                 }
             }
             _ => {
+                // Check for @-rule content (identifier after @rule like "@media screen")
+                if self.has_at_rule {
+                    let s = self.consume_ident()?;
+                    self.stream.skip_spaces();
+                    self.after_selector = true;
+                    return Ok(Token::AtStr(s));
+                }
+                
                 let name = self.consume_ident()?;
 
                 self.stream.skip_spaces();
 
                 if self.stream.is_char_eq(b'/')? {
-                    if !try!(self.consume_comment()) {
+                    if !self.consume_comment()? {
                         return Err(Error::UnknownToken(self.stream.gen_error_pos()));
                     }
                 }
@@ -372,12 +434,19 @@ impl<'a> Tokenizer<'a> {
                         return Ok(Token::DeclarationStr(name));
                     }
                 }
+                
+                // Check for `:` to determine if this is a declaration
+                if !self.stream.is_char_eq(b':')? {
+                    // Not a declaration, might be a type selector in nested context
+                    self.after_selector = true;
+                    return Ok(Token::DeclarationStr(name));
+                }
 
                 self.stream.advance_raw(1); // :
                 self.stream.skip_spaces();
 
                 if self.stream.is_char_eq(b'/')? {
-                    if !try!(self.consume_comment()) {
+                    if !self.consume_comment()? {
                         return Err(Error::UnknownToken(self.stream.gen_error_pos()));
                     }
                 }
@@ -395,7 +464,7 @@ impl<'a> Tokenizer<'a> {
                 }
 
                 self.stream.skip_spaces();
-                while try!(self.stream.is_char_eq(b';')) {
+                while self.stream.is_char_eq(b';')? {
                     self.stream.advance_raw(1);
                     self.stream.skip_spaces();
                 }
@@ -410,7 +479,7 @@ impl<'a> Tokenizer<'a> {
 
         while !self.stream.at_end() {
             if self.stream.is_ident_raw() {
-                try!(self.stream.advance(1));
+                self.stream.advance(1)?;
             } else {
                 break;
             }
@@ -427,13 +496,13 @@ impl<'a> Tokenizer<'a> {
     fn consume_comment(&mut self) -> Result<bool, Error>  {
         self.stream.advance_raw(1);
 
-        if try!(self.stream.is_char_eq(b'*')) {
+        if self.stream.is_char_eq(b'*')? {
             self.stream.advance_raw(1); // *
 
             while !self.stream.at_end() {
-                let len = try!(self.stream.length_to(b'*'));
-                try!(self.stream.advance(len + 1));
-                if try!(self.stream.is_char_eq(b'/')) {
+                let len = self.stream.length_to(b'*')?;
+                self.stream.advance(len + 1)?;
+                if self.stream.is_char_eq(b'/')? {
                     self.stream.advance_raw(1);
                     break;
                 }
@@ -443,5 +512,59 @@ impl<'a> Tokenizer<'a> {
         } else {
             return Ok(false);
         }
+    }
+    
+    /// Consumes parenthesized content like "(min-width: 800px)" or "(linux)"
+    /// Handles nested parentheses correctly.
+    fn consume_parenthesized_content(&mut self) -> Result<&'a str, Error> {
+        if !self.stream.is_char_eq(b'(')? {
+            return Err(Error::UnknownToken(self.stream.gen_error_pos()));
+        }
+        
+        let start = self.stream.pos();
+        self.stream.advance_raw(1); // consume opening (
+        
+        let mut depth = 1;
+        
+        while !self.stream.at_end() && depth > 0 {
+            match self.stream.curr_char_raw() {
+                b'(' => {
+                    depth += 1;
+                    self.stream.advance_raw(1);
+                }
+                b')' => {
+                    depth -= 1;
+                    self.stream.advance_raw(1);
+                }
+                b'"' | b'\'' => {
+                    // Skip quoted strings
+                    let quote = self.stream.curr_char_raw();
+                    self.stream.advance_raw(1);
+                    while !self.stream.at_end() {
+                        let c = self.stream.curr_char_raw();
+                        self.stream.advance_raw(1);
+                        if c == quote {
+                            break;
+                        }
+                        if c == b'\\' && !self.stream.at_end() {
+                            self.stream.advance_raw(1); // skip escaped char
+                        }
+                    }
+                }
+                _ => {
+                    self.stream.advance_raw(1);
+                }
+            }
+        }
+        
+        if depth != 0 {
+            return Err(Error::UnknownToken(self.stream.gen_error_pos()));
+        }
+        
+        // Return content including the parentheses
+        let end = self.stream.pos();
+        let s = self.stream.slice_region_raw_str(start, end);
+        self.stream.skip_spaces();
+        Ok(s)
     }
 }
