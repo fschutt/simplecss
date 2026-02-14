@@ -1,12 +1,12 @@
 [package]
 name = "azul-simplecss"
-version = "0.1.2"
-authors = ["Reizner Evgeniy <razrfalcon@gmail.com>"]
+version = "0.2.0"
+authors = ["Reizner Evgeniy <razrfalcon@gmail.com>", "Felix Schütt <felix.schuett@maps4print.com>"]
 license = "MPL-2.0"
 readme = "README.md"
-description = "A very simple CSS 2.1 tokenizer."
-repository = "https://github.com/RazrFalcon/simplecss"
-keywords = ["css", "parser", "tokenizer"]
+description = "A very simple CSS 2.1 tokenizer with CSS nesting support."
+repository = "https://github.com/fschutt/simplecss"
+keywords = ["css", "parser", "tokenizer", "nesting"]
 edition = "2021"
 
 [lib]

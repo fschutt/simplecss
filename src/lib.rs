@@ -3,14 +3,11 @@
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
 /*! A very simple streaming parser/tokenizer for [CSS 2.1](https://www.w3.org/TR/CSS21/)
-data format without heap allocations.
+data format without heap allocations. Supports CSS nesting for nested selectors and @-rules.
 
 Since it's very simple we will start with limitations:
 
 ## Limitations
-- [At-rules](https://www.w3.org/TR/CSS21/syndata.html#at-rules) are not supported.
-
-  `@import`, `@media`, etc. will lead to a parsing error.
 - The ident token must be ASCII only.
 
   CSS like `#аттр { имя:значение }` will lead to a parsing error.
