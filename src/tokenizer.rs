@@ -507,6 +507,28 @@ impl<'a> Tokenizer<'a> {
                     return Err(Error::UnknownToken(self.stream.gen_error_pos()));
                 }
             }
+            c if !self.has_at_rule && stream::is_digit(c) => {
+                // A digit can only start a KEYFRAME STOP selector here
+                // (`50% { .. }`, `62.5%, to { .. }` inside `@keyframes`):
+                // declaration property names never begin with a digit.
+                // Consume `[0-9.]*` plus an optional trailing `%` as one
+                // type selector so `@keyframes` bodies tokenize natively.
+                let start = self.stream.pos();
+                while !self.stream.at_end() {
+                    let ch = self.stream.curr_char_raw();
+                    if stream::is_digit(ch) || ch == b'.' {
+                        self.stream.advance_raw(1);
+                    } else {
+                        break;
+                    }
+                }
+                if !self.stream.at_end() && self.stream.curr_char_raw() == b'%' {
+                    self.stream.advance_raw(1);
+                }
+                let s = self.stream.slice_region_raw_str(start, self.stream.pos());
+                self.after_selector = true;
+                return Ok(Token::TypeSelector(s));
+            }
             _ => {
                 // Check for @-rule content (identifier after @rule like "@media screen")
                 if self.has_at_rule {

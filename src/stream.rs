@@ -27,7 +27,7 @@ fn is_letter(c: u8) -> bool {
 }
 
 #[inline]
-fn is_digit(c: u8) -> bool {
+pub(crate) fn is_digit(c: u8) -> bool {
     match c {
         b'0'..=b'9' => true,
         _ => false,

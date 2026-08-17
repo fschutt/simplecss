@@ -849,3 +849,60 @@ fn nested_comma_selectors() {
     assert_eq!(t.parse_next().unwrap(), Token::BlockEnd);
     assert_eq!(t.parse_next().unwrap(), Token::EndOfStream);
 }
+
+// --- Percent keyframe-stop selectors (0.2.1) -------------------------------
+// Before 0.2.1 a digit at selector position inside a block was an
+// UnknownToken error, which forced CSS engines to extract `@keyframes`
+// bodies textually before tokenizing. Digits at selector position can only
+// be keyframe stops (declaration property names never start with a digit),
+// so `[0-9.]*%?` now tokenizes as one TypeSelector.
+
+test!(keyframes_percent_stops_1,
+    "@keyframes k { 0% { opacity: 0; } 100% { opacity: 1; } }",
+    Token::AtRule("keyframes"),
+    Token::AtStr("k"),
+    Token::BlockStart,
+    Token::TypeSelector("0%"),
+    Token::BlockStart,
+    Token::Declaration("opacity", "0"),
+    Token::BlockEnd,
+    Token::TypeSelector("100%"),
+    Token::BlockStart,
+    Token::Declaration("opacity", "1"),
+    Token::BlockEnd,
+    Token::BlockEnd
+);
+
+test!(keyframes_percent_stops_fractional_and_comma_list,
+    "@keyframes k { 62.5%, to { width: 10px; } }",
+    Token::AtRule("keyframes"),
+    Token::AtStr("k"),
+    Token::BlockStart,
+    Token::TypeSelector("62.5%"),
+    Token::Comma,
+    Token::TypeSelector("to"),
+    Token::BlockStart,
+    Token::Declaration("width", "10px"),
+    Token::BlockEnd,
+    Token::BlockEnd
+);
+
+test!(keyframes_nested_inside_media,
+    "@media screen { @keyframes k { 50% { left: 5px; } } p { color: red; } }",
+    Token::AtRule("media"),
+    Token::AtStr("screen"),
+    Token::BlockStart,
+    Token::AtRule("keyframes"),
+    Token::AtStr("k"),
+    Token::BlockStart,
+    Token::TypeSelector("50%"),
+    Token::BlockStart,
+    Token::Declaration("left", "5px"),
+    Token::BlockEnd,
+    Token::BlockEnd,
+    Token::TypeSelector("p"),
+    Token::BlockStart,
+    Token::Declaration("color", "red"),
+    Token::BlockEnd,
+    Token::BlockEnd
+);
