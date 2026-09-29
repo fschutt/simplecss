@@ -906,3 +906,24 @@ test!(keyframes_nested_inside_media,
     Token::BlockEnd,
     Token::BlockEnd
 );
+
+// An empty declaration value (`--empty: ;`, a valid empty custom property)
+// is a declaration with an empty value. It used to be `UnknownToken`, and
+// a consumer that bails on a tokenizer error lost the whole stylesheet.
+test!(empty_value_before_semicolon,
+    "div { --empty: ; color: red; }",
+    Token::TypeSelector("div"),
+    Token::BlockStart,
+    Token::Declaration("--empty", ""),
+    Token::Declaration("color", "red"),
+    Token::BlockEnd
+);
+
+test!(empty_value_before_block_end,
+    "div { color: red; --empty: }",
+    Token::TypeSelector("div"),
+    Token::BlockStart,
+    Token::Declaration("color", "red"),
+    Token::Declaration("--empty", ""),
+    Token::BlockEnd
+);
