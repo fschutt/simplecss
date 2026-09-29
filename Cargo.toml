@@ -1,6 +1,6 @@
 [package]
 name = "azul-simplecss"
-version = "0.2.1"
+version = "0.2.2"
 authors = ["Reizner Evgeniy <razrfalcon@gmail.com>", "Felix Schütt <felix.schuett@maps4print.com>"]
 license = "MPL-2.0"
 readme = "README.md"

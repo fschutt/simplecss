@@ -553,11 +553,13 @@ fn invalid_7() {
 
 #[test]
 fn invalid_8() {
+    // An empty value is a well-formed declaration (CSS Syntax); whether
+    // `color` accepts it is the consumer's call, not the tokenizer's.
     let mut t = Tokenizer::new("div { color: }");
     assert_eq!(t.parse_next().unwrap(), Token::TypeSelector("div"));
     assert_eq!(t.parse_next().unwrap(), Token::BlockStart);
-    // assert_eq!(t.parse_next().unwrap(), Token::Property("color"));
-    assert_eq!(t.parse_next().unwrap_err(), Error::UnknownToken(ErrorPos::new(1, 14)));
+    assert_eq!(t.parse_next().unwrap(), Token::Declaration("color", ""));
+    assert_eq!(t.parse_next().unwrap(), Token::BlockEnd);
 }
 
 #[test]

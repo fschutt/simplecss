@@ -576,10 +576,11 @@ impl<'a> Tokenizer<'a> {
 
                 let len = self.stream.length_to_either(&[b';', b'}'])?;
 
-                if len == 0 {
-                    return Err(Error::UnknownToken(self.stream.gen_error_pos()));
-                }
-
+                // An empty value (`--empty: ;`) is a declaration with an empty
+                // value - valid for a custom property, and for any other
+                // property the consumer rejects that one declaration. An error
+                // here lost the rest of the stylesheet in consumers that stop
+                // at a tokenizer error.
                 let mut value = self.stream.read_raw_str(len);
                 // trim spaces at the end of the value
                 if let Some(p) = value.as_bytes().iter().rposition(|c| !stream::is_space(*c)) {
